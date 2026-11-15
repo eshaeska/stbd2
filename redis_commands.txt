@@ -1,0 +1,55 @@
+# =====================================================================
+# Redis (key-value / in-memory): "живий" стан автопарку
+# Запуск:  redis-cli      (Docker: docker exec -it redis redis-cli)
+# Навіщо: остання позиція авто, живая карта, статус "онлайн" з TTL, лічильники
+# =====================================================================
+
+PING                                   # перевірка зв'язку -> PONG
+
+# ---- 1) STRING: простий ключ-значення, TTL (статус "онлайн") ----
+SET vehicle:1:online 1 EX 60           # авто на зв'язку, ключ зникне через 60 с
+GET vehicle:1:online
+TTL vehicle:1:online                   # скільки секунд лишилось
+EXISTS vehicle:1:online
+
+# ---- 2) COUNTER: атомарні лічильники ----
+INCR trips:today                       # +1 рейс
+INCRBY fuel:liters:today 45
+GET trips:today
+
+# ---- 3) HASH: остання відома позиція/стан авто (як "рядок") ----
+HSET vehicle:1:last lat 50.45 lon 30.52 speed 62.5 ts 1767254400
+HSET vehicle:2:last lat 50.40 lon 30.60 speed 0    ts 1767254400
+HGET vehicle:1:last speed
+HGETALL vehicle:1:last
+HINCRBYFLOAT vehicle:1:last speed 5
+
+# ---- 4) GEO: гео-індекс авто (живая карта) ----
+GEOADD vehicles:geo 30.52 50.45 vehicle:1
+GEOADD vehicles:geo 30.60 50.40 vehicle:2
+GEOADD vehicles:geo 30.90 50.10 vehicle:3
+GEODIST vehicles:geo vehicle:1 vehicle:2 km                              # відстань між авто
+GEOSEARCH vehicles:geo FROMLONLAT 30.52 50.45 BYRADIUS 15 km ASC WITHDIST   # авто в радіусі 15 км
+
+# ---- 5) SORTED SET: рейтинг/топ (наприклад, водії за пройденими км) ----
+ZADD drivers:km:today 120.5 driver:10 340 driver:11 75.2 driver:12
+ZINCRBY drivers:km:today 20 driver:12
+ZREVRANGE drivers:km:today 0 2 WITHSCORES      # топ-3
+ZRANK drivers:km:today driver:12
+
+# ---- 6) LIST: черга/останні події ----
+LPUSH events:vehicle:1 "start_trip" "refuel" "stop"
+LRANGE events:vehicle:1 0 9                    # останні 10 подій
+LTRIM events:vehicle:1 0 99                    # зберігати лише 100
+
+# ---- 7) SET: множини (наприклад, авто у рейсі) ----
+SADD vehicles:in_trip 1 2 3
+SISMEMBER vehicles:in_trip 2
+SMEMBERS vehicles:in_trip
+SREM vehicles:in_trip 2
+SCARD vehicles:in_trip
+
+# ---- Службове ----
+KEYS vehicle:*                                 # лише для відладки (на проді - SCAN)
+DEL vehicle:1:online
+FLUSHDB                                        # очистити поточну БД (обережно!)
